@@ -796,6 +796,13 @@ fn build_gtk_scrolledwindow(bargs: &mut BuilderArgs) -> Result<gtk::ScrolledWind
     Ok(gtk_widget)
 }
 
+/// Returns `(screen_x, screen_y, width, height)` for the widget in root-window coordinates.
+fn widget_screen_geometry(widget: &impl gtk::prelude::WidgetExt) -> (i32, i32, i32, i32) {
+    let alloc = widget.allocation();
+    let origin = widget.window().map(|w| w.origin()).unwrap_or((0, 0, 0));
+    (origin.1 + alloc.x(), origin.2 + alloc.y(), alloc.width(), alloc.height())
+}
+
 const WIDGET_NAME_EVENTBOX: &str = "eventbox";
 /// @widget eventbox
 /// @desc a container which can receive events and must contain exactly one child. Supports `:hover` and `:active` css selectors.
@@ -830,36 +837,48 @@ fn build_gtk_event_box(bargs: &mut BuilderArgs) -> Result<gtk::EventBox> {
 
     def_widget!(bargs, _g, gtk_widget, {
         // @prop timeout - timeout of the command. Default: "200ms"
-        // @prop onscroll - event to execute when the user scrolls with the mouse over the widget. The placeholder `{}` used in the command will be replaced with either `up` or `down`.
+        // @prop onscroll - event to execute when the user scrolls with the mouse over the widget. The placeholder `{}` or `{0}` is replaced with `up` or `down`. `{1}`, `{2}`, `{3}`, `{4}` are replaced with the widget's screen x, y, width, and height in pixels.
         prop(timeout: as_duration = Duration::from_millis(200), onscroll: as_string) {
             gtk_widget.add_events(gdk::EventMask::SCROLL_MASK);
             gtk_widget.add_events(gdk::EventMask::SMOOTH_SCROLL_MASK);
-            connect_signal_handler!(gtk_widget, gtk_widget.connect_scroll_event(move |_, evt| {
+            connect_signal_handler!(gtk_widget, gtk_widget.connect_scroll_event(move |widget, evt| {
                 let delta = evt.delta().1;
                 if delta != 0f64 { // Ignore the first event https://bugzilla.gnome.org/show_bug.cgi?id=675959
-                    run_command(timeout, &onscroll, &[if delta < 0f64 { "up" } else { "down" }]);
+                    let (sx, sy, w, h) = widget_screen_geometry(widget);
+                    run_command(timeout, &onscroll, &[
+                        (if delta < 0f64 { "up" } else { "down" }).to_string(),
+                        sx.to_string(), sy.to_string(), w.to_string(), h.to_string(),
+                    ]);
                 }
                 glib::Propagation::Proceed
             }));
         },
         // @prop timeout - timeout of the command. Default: "200ms"
-        // @prop onhover - event to execute when the user hovers over the widget
+        // @prop onhover - event to execute when the user hovers over the widget. `{0}` and `{1}` are the cursor's widget-relative x and y. `{2}`, `{3}`, `{4}`, `{5}` are the widget's screen x, y, width, and height in pixels.
         prop(timeout: as_duration = Duration::from_millis(200), onhover: as_string) {
             gtk_widget.add_events(gdk::EventMask::ENTER_NOTIFY_MASK);
-            connect_signal_handler!(gtk_widget, gtk_widget.connect_enter_notify_event(move |_, evt| {
+            connect_signal_handler!(gtk_widget, gtk_widget.connect_enter_notify_event(move |widget, evt| {
                 if evt.detail() != NotifyType::Inferior {
-                    run_command(timeout, &onhover, &[evt.position().0, evt.position().1]);
+                    let (sx, sy, w, h) = widget_screen_geometry(widget);
+                    run_command(timeout, &onhover, &[
+                        evt.position().0, evt.position().1,
+                        sx as f64, sy as f64, w as f64, h as f64,
+                    ]);
                 }
                 glib::Propagation::Proceed
             }));
         },
         // @prop timeout - timeout of the command. Default: "200ms"
-        // @prop onhoverlost - event to execute when the user losts hovers over the widget
+        // @prop onhoverlost - event to execute when the user losts hovers over the widget. `{0}` and `{1}` are the cursor's widget-relative x and y. `{2}`, `{3}`, `{4}`, `{5}` are the widget's screen x, y, width, and height in pixels.
         prop(timeout: as_duration = Duration::from_millis(200), onhoverlost: as_string) {
             gtk_widget.add_events(gdk::EventMask::LEAVE_NOTIFY_MASK);
-            connect_signal_handler!(gtk_widget, gtk_widget.connect_leave_notify_event(move |_, evt| {
+            connect_signal_handler!(gtk_widget, gtk_widget.connect_leave_notify_event(move |widget, evt| {
                 if evt.detail() != NotifyType::Inferior {
-                    run_command(timeout, &onhoverlost, &[evt.position().0, evt.position().1]);
+                    let (sx, sy, w, h) = widget_screen_geometry(widget);
+                    run_command(timeout, &onhoverlost, &[
+                        evt.position().0, evt.position().1,
+                        sx as f64, sy as f64, w as f64, h as f64,
+                    ]);
                 }
                 glib::Propagation::Proceed
             }));
@@ -938,19 +957,20 @@ fn build_gtk_event_box(bargs: &mut BuilderArgs) -> Result<gtk::EventBox> {
         prop(
             // @prop timeout - timeout of the command. Default: "200ms"
             timeout: as_duration = Duration::from_millis(200),
-            // @prop onclick - command to run when the widget is clicked
+            // @prop onclick - command to run when the widget is clicked. `{0}`, `{1}`, `{2}`, `{3}` are the widget's screen x, y, width, and height in pixels.
             onclick: as_string = "",
-            // @prop onmiddleclick - command to run when the widget is middleclicked
+            // @prop onmiddleclick - command to run when the widget is middleclicked. `{0}`, `{1}`, `{2}`, `{3}` are the widget's screen x, y, width, and height in pixels.
             onmiddleclick: as_string = "",
-            // @prop onrightclick - command to run when the widget is rightclicked
+            // @prop onrightclick - command to run when the widget is rightclicked. `{0}`, `{1}`, `{2}`, `{3}` are the widget's screen x, y, width, and height in pixels.
             onrightclick: as_string = ""
         ) {
             gtk_widget.add_events(gdk::EventMask::BUTTON_PRESS_MASK);
-            connect_signal_handler!(gtk_widget, gtk_widget.connect_button_release_event(move |_, evt| {
+            connect_signal_handler!(gtk_widget, gtk_widget.connect_button_release_event(move |widget, evt| {
+                let (sx, sy, w, h) = widget_screen_geometry(widget);
                 match evt.button() {
-                    1 => run_command(timeout, &onclick, &[] as &[&str]),
-                    2 => run_command(timeout, &onmiddleclick, &[] as &[&str]),
-                    3 => run_command(timeout, &onrightclick, &[] as &[&str]),
+                    1 => run_command(timeout, &onclick, &[sx, sy, w, h]),
+                    2 => run_command(timeout, &onmiddleclick, &[sx, sy, w, h]),
+                    3 => run_command(timeout, &onrightclick, &[sx, sy, w, h]),
                     _ => {},
                 }
                 glib::Propagation::Proceed
